@@ -1,0 +1,224 @@
+
+```{r}
+library(tidymodels)
+library(tidyverse)
+```
+
+```{r}
+churn_data <- read_csv("D:\\work\\machine learning\\test 2\\churn.csv")
+glimpse(churn_data)
+```
+
+```{r}
+summary(churn_data)
+```
+
+```{r}
+freq_tables <- churn_data %>% select(where(is.factor)) %>% map(~ table(churn_data$Churn,.)) 
+freq_tables
+```
+
+```{r}
+churn_data <- churn_data %>%
+mutate(Churn = as.factor(Churn))
+churn_data
+```
+
+
+```{r}
+set.seed(2025)
+churn_split <- churn_data %>% initial_split(prop = 0.8, strata= Churn )
+churn_train <- churn_split %>% training()
+churn_test <- churn_split %>% testing()
+```
+
+** Logistic Regression:
+```{r}
+#LASSO:
+churn_lasso <- logistic_reg(penalty = 0.1, mixture = 1) %>%
+  set_engine("glmnet") %>%
+  set_mode("classification")
+churn_lasso
+
+#RIDGE:
+churn_ridge <- logistic_reg(penalty = 1,mixture = 0) %>%
+set_mode("classification") %>%
+set_engine("glmnet")
+churn_ridge
+```
+
+**KNN:
+```{r}
+churn_knn <- nearest_neighbor(dist_power = 2,neighbors = 5) %>%
+set_mode("classification") %>%
+set_engine("kknn")
+churn_knn
+
+```
+**SVM:
+```{r}
+#Linear SVM:
+churn_svm_linear <- svm_linear(cost = 8 , margin = 0.1) %>% 
+  set_engine("kernlab") %>% 
+  set_mode("classification")
+churn_svm_linear
+
+# Polynomial SVM:
+churn_svm_poly <- svm_poly(cost = 8,degree = 3) %>% 
+  set_engine("kernlab") %>% 
+  set_mode("classification")
+churn_svm_poly
+
+# Radial Basis Function (RBF) SVM:
+churn_svm_rbf <- svm_rbf(cost = 8,rbf_sigma = 0.1) %>%
+set_mode("classification") %>%
+set_engine("kernlab")
+churn_svm_rbf
+
+```
+**Decision Trees:
+
+```{r}
+#decision tree:
+churn_dt <- decision_tree(tree_depth = 5,min_n = 90, cost_complexity = 0.02) %>%
+set_mode("classification") %>%
+set_engine("rpart")
+churn_dt
+
+#boosting:
+churn_boost <- boost_tree(trees = 100,mtry = 5,min_n = 30,tree_depth = 5,learn_rate = 0.0001) %>% 
+  set_engine("xgboost") %>% 
+  set_mode("classification")
+churn_boost
+
+# Random Forest:
+churn_rf <- rand_forest( trees = 100, min_n = 90, mtry = 5 ) %>% 
+  set_engine("ranger") %>% 
+  set_mode("classification")
+churn_rf
+```
+***Recipe:
+```{r}
+churn_rec <- churn_train %>%
+  recipe(formula = Churn ~.) %>%
+  step_nzv(all_numeric_predictors()) %>%
+  step_impute_median(all_numeric_predictors()) %>%
+  step_impute_mode(all_nominal_predictors()) %>%
+  step_normalize(all_numeric_predictors()) %>%
+  step_other(all_nominal_predictors(),threshold = 0.05 ) %>%
+  step_corr(all_numeric_predictors(),threshold = 0.9) %>%
+  step_dummy(all_nominal_predictors())
+```
+
+*** Logistic Regression:
+```{r}
+#model
+churn_tune1 <- logistic_reg(penalty = tune(), mixture = tune()) %>%
+  set_engine("glmnet") %>%
+  set_mode("classification")
+churn_tune1
+#workflow
+churn_wf1 <- workflow() %>%
+  add_model(churn_tune1) %>%
+  add_recipe(churn_rec)
+#find the tune
+churn_grid1 <- grid_regular(penalty(range = c(-5,5)), mixture(),
+                         levels = 20)
+churn_grid1
+
+churn_cv1 <- churn_train %>% vfold_cv(v = 8,strata = Churn)
+churn_cv1
+
+churn_res1 <- churn_wf1 %>%
+  tune_grid(resamples = churn_cv1,grid = churn_grid1,control = control_grid(verbose = T))
+
+churn_res1 %>% show_best(n = 10)
+
+churn_best1 <- churn_res1 %>% select_best(metric = "roc_auc")
+churn_best1
+```
+
+
+```{r}
+#final wf
+churn_wf_final1 <- churn_wf1 %>%
+  finalize_workflow(parameters = churn_best1)
+churn_wf_final1
+#fit
+churn_fit1 <- last_fit(churn_wf_final1,split = churn_split)
+ churn_fit1
+#metrix
+ metrics1 <- churn_fit1 %>% collect_metrics()
+ metrics1
+#calculate the predictions
+ churn_fit1 %>% collect_predictions()
+#get the confusion matrix
+ churn_fit1 %>%
+  collect_predictions()%>%
+  conf_mat(truth=Churn,estimate=.pred_class)
+#plot the ROC curve
+ churn_fit1 %>%
+   collect_predictions() %>%
+   roc_curve(truth = Churn,.pred_No) %>%
+   autoplot()
+
+```
+***KNN:
+```{r}
+library(kknn)
+
+#model
+churn_tune2 <- churn_tune2<- nearest_neighbor(dist_power = tune(),neighbors = tune()) %>%
+set_mode("classification") %>%
+set_engine("kknn")
+#workflow
+churn_wf2 <- workflow() %>%
+  add_model(churn_tune2) %>%
+  add_recipe(churn_rec)
+#find the tune
+churn_grid2 <- grid_regular( neighbors(range = c(1, 20)), dist_power(range = c(1, 3)), 
+                             levels = 5 )
+
+churn_cv2 <- churn_train %>% vfold_cv(v = 8,strata = Churn)
+churn_cv2
+
+churn_res2 <- churn_wf2 %>%
+  tune_grid(resamples = churn_cv2,grid = churn_grid2,control = control_grid(verbose = T))
+
+churn_res2 %>% show_best(n = 10)
+
+churn_best2 <- churn_res2 %>% select_best(metric = "roc_auc")
+churn_best2
+
+
+```
+
+```{r}
+#final wf
+churn_wf_final2 <- churn_wf2 %>%
+  finalize_workflow(parameters = churn_best2)
+churn_wf_final2
+#fit
+churn_fit2 <- last_fit(churn_wf_final2,split = churn_split)
+ churn_fit2
+#metrix
+ metrics2 <- churn_fit2 %>% collect_metrics()
+ metrics2
+#calculate the predictions
+ churn_fit2 %>% collect_predictions()
+#get the confusion matrix
+ churn_fit2 %>%
+  collect_predictions()%>%
+  conf_mat(truth=Churn,estimate=.pred_class)
+#plot the ROC curve
+ churn_fit2 %>%
+   collect_predictions() %>%
+   roc_curve(truth = Churn,.pred_No) %>%
+   autoplot()
+```
+
+
+
+
+
+
